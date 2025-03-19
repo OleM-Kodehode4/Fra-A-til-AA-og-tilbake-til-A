@@ -1,28 +1,20 @@
-// db.js
-require("dotenv").config(); // Last inn .env-filen
+import sql from "mssql";
+import { config } from "dotenv";
 
-import { ConnectionPool } from "mssql";
+// Last inn miljøvariabler
+config();
 
-const config = {
-  user: process.env.DB_USER, // Hent fra .env-filen
-  password: process.env.DB_PASSWORD, // Hent fra .env-filen
-  server: process.env.DB_SERVER, // Hent fra .env-filen
-  database: process.env.DB_DATABASE, // Hent fra .env-filen
+// Konfigurasjon av SQL Server-tilkobling
+const poolPromise = new sql.ConnectionPool({
+  user: process.env.DB_USER,
+  password: process.env.DB_PASSWORD,
+  server: process.env.DB_SERVER,
+  database: process.env.DB_NAME,
   options: {
-    encrypt: true, // For Azure
-    trustServerCertificate: true, // For lokal utvikling
+    encrypt: true, // Brukes for å sikre tilkoblingen (spesielt i Azure)
+    trustServerCertificate: true, // Kan være nødvendig for lokale utviklingsmiljøer
   },
-};
+}).connect();
 
-const poolPromise = new ConnectionPool(config)
-  .connect()
-  .then((pool) => {
-    console.log("Database connected!");
-    return pool;
-  })
-  .catch((err) => {
-    console.error("Database connection failed:", err);
-    process.exit();
-  });
-
-export default poolPromise;
+// Eksporter poolen for bruk i andre moduler
+export { poolPromise, sql };

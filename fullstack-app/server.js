@@ -1,20 +1,33 @@
-// server.js
-require("dotenv").config(); // Last inn .env-filen
 import express from "express";
-import { json } from "body-parser";
-import { sign, verify } from "jsonwebtoken";
-import poolPromise from "./db";
+import { config } from "dotenv";
+import sql from "mssql"; // Importer mssql med default import
+import jwt from "jsonwebtoken";
+
+// Last inn miljøvariabler
+config();
 
 const app = express();
-const port = 3000;
 
-app.use(json());
+// Bruk express.json() for å parse JSON request body
+app.use(express.json());
 
-// API-endepunkter
-// 1. Opprett bruker
+// Konfigurasjon av SQL Server-tilkobling
+const poolPromise = new sql.ConnectionPool({
+  user: process.env.DB_USER,
+  password: process.env.DB_PASSWORD,
+  server: process.env.DB_SERVER,
+  database: process.env.DB_NAME,
+  options: {
+    encrypt: true, // Brukes for å sikre tilkoblingen (spesielt i Azure)
+    trustServerCertificate: true, // Kan være nødvendig for lokale utviklingsmiljøer
+  },
+}).connect();
+
+// API-endepunkt for registrering av ny bruker
 app.post("/api/user/create", async (req, res) => {
-  const { email, password, firstName, lastName } = req.body;
   try {
+    const { email, password, firstName, lastName } = req.body;
+
     const pool = await poolPromise;
     const result = await pool
       .request()
@@ -22,18 +35,20 @@ app.post("/api/user/create", async (req, res) => {
       .input("Password", sql.NVarChar, password)
       .input("FirstName", sql.NVarChar, firstName)
       .input("LastName", sql.NVarChar, lastName)
-      .execute("RegisterUser");
-    res.status(200).json({ message: "User created successfully" });
+      .execute("CreateUser");
+
+    res.status(200).json(result.recordset);
   } catch (err) {
-    console.error("Error creating user:", err);
-    res.status(500).json({ message: "Error creating user" });
+    console.error(err);
+    res.status(500).send("Error while creating user");
   }
 });
 
-// 2. Logg inn bruker og returner token
+// API-endepunkt for innlogging
 app.post("/api/user/login", async (req, res) => {
-  const { email, password } = req.body;
   try {
+    const { email, password } = req.body;
+
     const pool = await poolPromise;
     const result = await pool
       .request()
@@ -42,52 +57,50 @@ app.post("/api/user/login", async (req, res) => {
       .execute("LoginUser");
 
     if (result.recordset.length === 0) {
-      return res.status(401).json({ message: "Invalid credentials" });
+      return res.status(400).send("Invalid credentials");
     }
 
-    const token = sign(
-      { userId: result.recordset[0].UserID },
-      process.env.JWT_SECRET,
-      { expiresIn: "1h" }
-    );
+    const user = result.recordset[0];
+    const token = jwt.sign({ userId: user.UserID }, process.env.JWT_SECRET, {
+      expiresIn: "1h",
+    });
+
     res.status(200).json({ token });
   } catch (err) {
-    console.error("Error logging in:", err);
-    res.status(500).json({ message: "Error logging in" });
+    console.error(err);
+    res.status(500).send("Error during login");
   }
 });
 
-// 3. Rediger bruker
+// API-endepunkt for redigering av bruker
 app.post("/api/user/edit", async (req, res) => {
-  const { token, newFirstName, newLastName } = req.body;
   try {
-    const decoded = verify(token, process.env.JWT_SECRET);
+    const { token, newFirstName, newLastName } = req.body;
+
+    // Verifiser token
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
     const userId = decoded.userId;
 
     const pool = await poolPromise;
     const result = await pool
       .request()
-      .input("Token", sql.NVarChar, token)
+      .input("UserID", sql.Int, userId)
       .input("NewFirstName", sql.NVarChar, newFirstName)
       .input("NewLastName", sql.NVarChar, newLastName)
       .execute("EditUser");
 
-    if (result.returnValue === -1) {
-      return res.status(401).json({ message: "Invalid Token" });
-    }
-
-    if (result.returnValue === -2) {
-      return res.status(401).json({ message: "Token expired" });
-    }
-
-    res.status(200).json({ message: "User updated successfully" });
+    res.status(200).json(result.recordset);
   } catch (err) {
-    console.error("Error editing user:", err);
-    res.status(500).json({ message: "Error editing user" });
+    console.error(err);
+    if (err.name === "JsonWebTokenError") {
+      return res.status(401).send("Invalid or expired token");
+    }
+    res.status(500).send("Error while editing user");
   }
 });
 
-// Start server
-app.listen(port, () => {
-  console.log(`Server running on port ${port}`);
+// Start serveren
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => {
+  console.log(`Server running on port ${PORT}`);
 });
