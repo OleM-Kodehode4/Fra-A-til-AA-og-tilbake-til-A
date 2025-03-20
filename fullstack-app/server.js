@@ -18,7 +18,7 @@ const poolPromise = new sql.ConnectionPool({
   server: process.env.DB_SERVER,
   database: process.env.DB_NAME,
   options: {
-    encrypt: true, // Brukes for å sikre tilkoblingen (spesielt i Azure)
+    encrypt: true, // Brukes for å sikre tilkoblingen
     trustServerCertificate: true, // Kan være nødvendig for lokale utviklingsmiljøer
   },
 }).connect();
